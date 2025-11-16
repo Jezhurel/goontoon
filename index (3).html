@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GoonToon</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }</style>
+  <link rel="icon" href="/favicon.png" />
+</head>
+<body class="min-h-screen bg-gradient-to-b from-slate-900 via-indigo-900 to-slate-800 text-slate-100">
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+  const { useState, useEffect } = React;
+
+  function App() {
+    const [series, setSeries] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState("");
+    const [showGenres, setShowGenres] = useState(false);
+    const [activeGenre, setActiveGenre] = useState("");
+    const [page, setPage] = useState("home");
+    const [query, setQuery] = useState("");
+
+    const [bookmarks, setBookmarks] = useState(() => {
+      try { return JSON.parse(localStorage.getItem('goontoon_bookmarks') || '[]'); } catch { return []; }
+    });
+    const [historyList, setHistoryList] = useState(() => {
+      try { return JSON.parse(localStorage.getItem('goontoon_history') || '[]'); } catch { return []; }
+    });
+
+    // Auth UI demo
+    const [showLoginModal, setShowLoginModal] = useState(false);
+    const [showSignupModal, setShowSignupModal] = useState(false);
+    const [authUser, setAuthUser] = useState(() => {
+      try { return JSON.parse(localStorage.getItem('goontoon_user') || 'null'); } catch { return null; }
+    });
+    const [loginEmail, setLoginEmail] = useState("");
+    const [loginPassword, setLoginPassword] = useState("");
+    const [signupEmail, setSignupEmail] = useState("");
+    const [signupPassword, setSignupPassword] = useState("");
+
+    const [showCreatorLoginModal, setShowCreatorLoginModal] = useState(false);
+    const [creatorPassword, setCreatorPassword] = useState("");
+    const [isCreator, setIsCreator] = useState(() => {
+      try { return JSON.parse(localStorage.getItem('goontoon_creator') || 'false'); } catch { return false; }
+    });
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [uploadTitle, setUploadTitle] = useState("");
+    const [uploadCategory, setUploadCategory] = useState("");
+    const [uploadEpisode, setUploadEpisode] = useState("");
+    const [uploadCoverUrl, setUploadCoverUrl] = useState("");
+    const [signupUsername, setSignupUsername] = useState("");
+
+    useEffect(() => { fetchList(); }, []);
+    useEffect(() => { localStorage.setItem('goontoon_bookmarks', JSON.stringify(bookmarks)); }, [bookmarks]);
+    useEffect(() => { localStorage.setItem('goontoon_history', JSON.stringify(historyList)); }, [historyList]);
+    useEffect(() => { localStorage.setItem('goontoon_user', JSON.stringify(authUser)); }, [authUser]);
+    useEffect(() => { localStorage.setItem('goontoon_creator', JSON.stringify(isCreator)); }, [isCreator]);
+
+    async function fetchList() {
+      setLoading(true);
+      try {
+        const res = await fetch('/.netlify/functions/supabase_list');
+        const data = await res.json();
+        if (res.ok) setSeries(data || []);
+        else setMessage(data.error || 'Failed to load');
+      } catch (err) {
+        setMessage('Network error');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function toggleBookmark(item) {
+      setBookmarks(prev => {
+        const exists = prev.find(p => p.id === item.id);
+        if (exists) return prev.filter(p => p.id !== item.id);
+        return [item, ...prev];
+      });
+    }
+
+    function markRead(item) {
+      setHistoryList(prev => {
+        const exists = prev.find(p => p.id === item.id);
+        if (exists) return prev;
+        return [{ ...item, read_at: new Date().toISOString() }, ...prev].slice(0,200);
+      });
+    }
+
+    function filteredSeries() {
+      let list = series.slice();
+      if (activeGenre) list = list.filter(s => (s.category || '').toLowerCase() === activeGenre.toLowerCase());
+      if (query) list = list.filter(s => (s.title || '').toLowerCase().includes(query.toLowerCase()) || (s.category || '').toLowerCase().includes(query.toLowerCase()));
+      return list;
+    }
+
+    const genres = ["Fantasy","Slice of Life","Sci-Fi","Romance","Drama","Action"];
+
+    // Demo auth handlers
+    function handleLoginSubmit(e) {
+      e.preventDefault();
+      if (!loginEmail || !loginPassword) { setMessage('Enter email and password'); return; }
+      const user = { email: loginEmail };
+      setAuthUser(user);
+      setShowLoginModal(false);
+      setLoginEmail(''); setLoginPassword('');
+      setMessage(`Signed in as ${user.email}`);
+    }
+    function handleSignupSubmit(e) {
+      e.preventDefault();
+      if (!signupEmail || !signupPassword || !signupUsername) { setMessage('Fill all fields'); return; }
+      const user = { email: signupEmail, username: signupUsername };
+      setAuthUser(user);
+      setShowSignupModal(false);
+      setSignupEmail(''); setSignupPassword(''); setSignupUsername('');
+      setMessage(`Registered as ${user.username || user.email}`);
+    }
+    function handleSignOut() { setAuthUser(null); setMessage('Signed out'); }
+
+    function handleCreatorLogin(e) {
+      e.preventDefault();
+      if (creatorPassword === 'majeztic01') {
+        setIsCreator(true);
+        setShowCreatorLoginModal(false);
+        setCreatorPassword('');
+        setMessage('Creator access granted');
+      } else {
+        setMessage('Invalid creator password');
+      }
+    }
+
+    function handleCreatorLogout() {
+      setIsCreator(false);
+      setMessage('Creator logged out');
+    }
+
+    async function handleUploadSubmit(e) {
+      e.preventDefault();
+      if (!uploadTitle || !uploadCategory) {
+        setMessage('Please fill in all required fields');
+        return;
+      }
+      try {
+        const res = await fetch('/.netlify/functions/supabase_insert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: uploadTitle,
+            category: uploadCategory,
+            episode: uploadEpisode || 'Episode 1',
+            cover_url: uploadCoverUrl || ''
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setMessage('Successfully uploaded!');
+          setShowUploadModal(false);
+          setUploadTitle('');
+          setUploadCategory('');
+          setUploadEpisode('');
+          setUploadCoverUrl('');
+          fetchList();
+        } else {
+          setMessage(data.error || 'Upload failed');
+        }
+      } catch (err) {
+        setMessage('Network error');
+      }
+    }
+
+    return (
+      <div>
+        <header className="border-b border-slate-700/30">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button onClick={() => setPage('home')} className="rounded-md bg-gradient-to-r from-indigo-500 to-purple-600 px-3 py-2 font-bold text-lg">
+                Goon<span className="text-red-500">Toon</span>
+              </button>
+
+              <nav className="hidden md:flex gap-3 text-sm opacity-90 items-center relative">
+                <div className="relative">
+                  <button onClick={() => setShowGenres(v => !v)} className="px-2 py-1 hover:underline">Genres</button>
+                  {showGenres && (
+                    <div className="absolute mt-2 w-40 bg-slate-800 rounded shadow-lg p-2 z-30">
+                      <button onClick={() => { setActiveGenre(''); setShowGenres(false); }} className="w-full text-left px-2 py-1 rounded hover:bg-slate-700">All Genres</button>
+                      {genres.map(g => (
+                        <button key={g} onClick={() => { setActiveGenre(g); setShowGenres(false); }} className="w-full text-left px-2 py-1 rounded hover:bg-slate-700">{g}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setPage('bookmarks')} className="px-2 py-1 hover:underline">Bookmark</button>
+                <button onClick={() => setPage('history')} className="px-2 py-1 hover:underline">History</button>
+              </nav>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:block">
+                <input placeholder="Search comics, authors..." className="px-3 py-2 rounded bg-slate-800/50 placeholder:text-slate-400 border border-slate-700"
+                  value={query} onChange={e => setQuery(e.target.value)} />
+              </div>
+
+              {isCreator ? (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowUploadModal(true)} className="px-3 py-2 bg-purple-600 rounded text-sm">Upload</button>
+                  <button onClick={handleCreatorLogout} className="px-2 py-1 bg-red-600 rounded text-sm">Creator Logout</button>
+                </div>
+              ) : (
+                <button onClick={() => setShowCreatorLoginModal(true)} className="px-3 py-2 bg-purple-600 rounded text-sm">Creator</button>
+              )}
+
+              {!authUser ? (
+                <>
+                  <button onClick={() => setShowLoginModal(true)} className="px-3 py-2 bg-slate-800/40 rounded text-sm">Sign in</button>
+                  <button onClick={() => setShowSignupModal(true)} className="px-3 py-2 bg-amber-400 text-slate-900 rounded text-sm">Sign up</button>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-slate-300">{authUser.username ? authUser.username : authUser.email}</div>
+                  <button onClick={handleSignOut} className="px-2 py-1 bg-slate-700 rounded text-sm">Sign out</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          {page === 'home' && (
+            <>
+              <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 rounded-2xl overflow-hidden relative shadow-2xl bg-slate-900/40 h-96 flex items-center justify-center text-slate-400">
+                  <div className="text-center px-6">No featured series available.</div>
+                </div>
+                <aside className="space-y-4">
+                  <div className="rounded-2xl bg-slate-900/40 p-4">
+                    <h4 className="text-sm text-slate-300">New Releases</h4>
+                    <div className="mt-3 text-slate-400 text-sm">&nbsp;</div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-900/30 p-4">
+                    <h4 className="text-sm text-slate-300">Categories</h4>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {genres.map(c => (
+                        <button key={c} onClick={() => setActiveGenre(c)} className="text-xs bg-slate-800/40 px-3 py-1 rounded">{c}</button>
+                      ))}
+                    </div>
+                  </div>
+                </aside>
+              </section>
+
+              <section className="mt-10">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold">Latest Updates {activeGenre ? `— ${activeGenre}` : ''}</h3>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {loading ? (
+                    <div className="col-span-full text-center text-slate-400">Loading...</div>
+                  ) : filteredSeries().length === 0 ? (
+                    <div className="col-span-full rounded-xl border-2 border-dashed border-slate-700/30 p-8 text-center text-slate-400">
+                      No released series yet.
+                    </div>
+                  ) : (
+                    filteredSeries().map(s => (
+                      <div key={s.id} className="rounded-xl overflow-hidden bg-gradient-to-b from-slate-900/40 to-transparent border border-slate-700/20">
+                        {s.cover_url ? (
+                          <img src={s.cover_url} alt={s.title} className="w-full h-48 object-cover" />
+                        ) : (
+                          <div className="w-full h-48 bg-slate-800 flex items-center justify-center">No cover</div>
+                        )}
+                        <div className="p-3">
+                          <div className="font-semibold text-sm line-clamp-2">{s.title}</div>
+                          <div className="text-xs text-slate-400 mt-1">{s.episode}</div>
+                          <div className="mt-2 flex gap-2">
+                            <button onClick={() => toggleBookmark(s)} className="px-2 py-1 text-xs bg-slate-700 rounded">
+                              {bookmarks.find(b => b.id === s.id) ? 'Unbookmark' : 'Bookmark'}
+                            </button>
+                            <button onClick={() => { markRead(s); setMessage('Marked as read'); }} className="px-2 py-1 text-xs bg-indigo-600 rounded">Mark read</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+
+          {page === 'bookmarks' && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-semibold">Bookmarks</h3>
+                <button onClick={() => setPage('home')} className="text-sm underline text-slate-400">Back to Home</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {bookmarks.length === 0 ? (
+                  <div className="col-span-full text-slate-400">You have no bookmarks.</div>
+                ) : (
+                  bookmarks.map(b => (
+                    <div key={b.id} className="rounded-xl overflow-hidden bg-gradient-to-b from-slate-900/40 to-transparent border border-slate-700/20">
+                      {b.cover_url ? (
+                        <img src={b.cover_url} alt={b.title} className="w-full h-48 object-cover" />
+                      ) : (
+                        <div className="w-full h-48 bg-slate-800 flex items-center justify-center">No cover</div>
+                      )}
+                      <div className="p-3">
+                        <div className="font-semibold text-sm line-clamp-2">{b.title}</div>
+                        <div className="text-xs text-slate-400 mt-1">{b.episode}</div>
+                        <div className="mt-2 flex gap-2">
+                          <button onClick={() => toggleBookmark(b)} className="px-2 py-1 text-xs bg-red-600 rounded">Remove</button>
+                          <button onClick={() => { markRead(b); setMessage('Marked as read'); }} className="px-2 py-1 text-xs bg-indigo-600 rounded">Mark read</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+
+          {page === 'history' && (
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-semibold">History</h3>
+                <button onClick={() => setPage('home')} className="text-sm underline text-slate-400">Back to Home</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {historyList.length === 0 ? (
+                  <div className="col-span-full text-slate-400">No history yet.</div>
+                ) : (
+                  historyList.map(h => (
+                    <div key={h.id} className="rounded-xl overflow-hidden bg-gradient-to-b from-slate-900/40 to-transparent border border-slate-700/20">
+                      {h.cover_url ? (
+                        <img src={h.cover_url} alt={h.title} className="w-full h-48 object-cover" />
+                      ) : (
+                        <div className="w-full h-48 bg-slate-800 flex items-center justify-center">No cover</div>
+                      )}
+                      <div className="p-3">
+                        <div className="font-semibold text-sm line-clamp-2">{h.title}</div>
+                        <div className="text-xs text-slate-400 mt-1">{h.episode}</div>
+                        <div className="text-xs text-slate-400 mt-1">Read: {h.read_at ? new Date(h.read_at).toLocaleString() : ''}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+
+        {message && (
+          <div className="fixed bottom-4 right-4 bg-indigo-700 px-4 py-3 rounded shadow-lg z-50">
+            {message}
+            <button onClick={() => setMessage('')} className="ml-3 text-slate-300 hover:text-white">✕</button>
+          </div>
+        )}
+        </main>
+
+        {/* Login Modal */}
+        {showLoginModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+            <div className="bg-slate-900 p-6 rounded w-96">
+              <h3 className="text-lg mb-2">Sign in</h3>
+              <form onSubmit={handleLoginSubmit}>
+                <input className="w-full mb-2 p-2 rounded bg-slate-800" placeholder="Email" value={loginEmail} onChange={(e)=>setLoginEmail(e.target.value)} />
+                <input type="password" className="w-full mb-4 p-2 rounded bg-slate-800" placeholder="Password" value={loginPassword} onChange={(e)=>setLoginPassword(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={()=>setShowLoginModal(false)} className="px-3 py-2 bg-slate-700 rounded">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-indigo-600 rounded">Sign in</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Signup Modal */}
+        {showSignupModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+            <div className="bg-slate-900 p-6 rounded w-96">
+              <h3 className="text-lg mb-2">Sign up</h3>
+              <form onSubmit={handleSignupSubmit}>
+                <input className="w-full mb-2 p-2 rounded bg-slate-800" placeholder="Username" value={signupUsername} onChange={(e)=>setSignupUsername(e.target.value)} />
+                <input className="w-full mb-2 p-2 rounded bg-slate-800" placeholder="Email" value={signupEmail} onChange={(e)=>setSignupEmail(e.target.value)} />
+                <input type="password" className="w-full mb-4 p-2 rounded bg-slate-800" placeholder="Password" value={signupPassword} onChange={(e)=>setSignupPassword(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={()=>setShowSignupModal(false)} className="px-3 py-2 bg-slate-700 rounded">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-amber-400 text-slate-900 rounded">Sign up</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Creator Login Modal */}
+        {showCreatorLoginModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+            <div className="bg-slate-900 p-6 rounded w-96">
+              <h3 className="text-lg mb-2">Creator Login</h3>
+              <form onSubmit={handleCreatorLogin}>
+                <input type="password" className="w-full mb-4 p-2 rounded bg-slate-800" placeholder="Creator Password" value={creatorPassword} onChange={(e)=>setCreatorPassword(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={()=>setShowCreatorLoginModal(false)} className="px-3 py-2 bg-slate-700 rounded">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-purple-600 rounded">Login</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+            <div className="bg-slate-900 p-6 rounded w-96">
+              <h3 className="text-lg mb-2">Upload to Latest Updates</h3>
+              <form onSubmit={handleUploadSubmit}>
+                <input className="w-full mb-2 p-2 rounded bg-slate-800" placeholder="Title *" value={uploadTitle} onChange={(e)=>setUploadTitle(e.target.value)} required />
+                <select className="w-full mb-2 p-2 rounded bg-slate-800" value={uploadCategory} onChange={(e)=>setUploadCategory(e.target.value)} required>
+                  <option value="">Select Category *</option>
+                  {genres.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <input className="w-full mb-2 p-2 rounded bg-slate-800" placeholder="Episode (e.g., Episode 1)" value={uploadEpisode} onChange={(e)=>setUploadEpisode(e.target.value)} />
+                <input className="w-full mb-4 p-2 rounded bg-slate-800" placeholder="Cover Image URL" value={uploadCoverUrl} onChange={(e)=>setUploadCoverUrl(e.target.value)} />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={()=>setShowUploadModal(false)} className="px-3 py-2 bg-slate-700 rounded">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-purple-600 rounded">Upload</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
